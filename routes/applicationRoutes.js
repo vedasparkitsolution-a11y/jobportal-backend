@@ -212,8 +212,8 @@ router.get('/my-applications', verifyToken, (req, res) => {
                COALESCE(j.company_name, u.companyName, a.company_name, 'Company') as companyName,
                COALESCE(j.company_logo, '') as companyLogo
         FROM applications a
-        LEFT JOIN jobs j ON (a.jobId = j.id OR a.jobId = j.job_id OR CAST(a.jobId AS CHAR) = CAST(j.id AS CHAR) OR CAST(a.jobId AS CHAR) = CAST(j.job_id AS CHAR))
-        LEFT JOIN users u ON a.companyId = u.id
+        LEFT JOIN jobs j ON (CAST(a.jobId AS CHAR) = CAST(j.id AS CHAR) OR a.jobId = j.job_id)
+        LEFT JOIN users u ON CAST(a.companyId AS CHAR) = CAST(u.id AS CHAR)
         WHERE (a.applicantId = ? AND ? != '' AND a.applicantId != '0') 
            OR (a.candidate_id = ? AND ? != '' AND a.candidate_id != '0')
            OR (LOWER(TRIM(a.candidate_email)) = ? AND ? != '')
@@ -296,7 +296,7 @@ router.get('/company', verifyToken, (req, res) => {
                     const allSql = `
                         SELECT a.*, COALESCE(j.title, j.job_title, 'Position') as jobTitle, j.company_name as companyName
                         FROM applications a
-                        LEFT JOIN jobs j ON (a.jobId = j.id OR a.jobId = j.job_id)
+                        LEFT JOIN jobs j ON (CAST(a.jobId AS CHAR) = CAST(j.id AS CHAR) OR a.jobId = j.job_id)
                         ORDER BY a.appliedAt DESC
                     `;
                     db.all(allSql, [], (err, rows) => {
@@ -319,9 +319,9 @@ router.get('/company', verifyToken, (req, res) => {
                        COALESCE(c.resume_url, a.resume_url, '') as real_resume_url,
                        COALESCE(c.resume_name, 'Resume.pdf') as real_resume_name
                 FROM applications a
-                JOIN jobs j ON (a.jobId = j.id OR a.jobId = j.job_id OR CAST(a.jobId AS CHAR) = CAST(j.id AS CHAR) OR CAST(a.jobId AS CHAR) = CAST(j.job_id AS CHAR))
+                JOIN jobs j ON (CAST(a.jobId AS CHAR) = CAST(j.id AS CHAR) OR a.jobId = j.job_id)
                 LEFT JOIN candidates c ON (a.candidate_id = c.candidate_id OR a.applicantId = c.candidate_id OR a.candidate_email = c.email)
-                LEFT JOIN users u ON (a.candidate_id = u.id OR a.applicantId = u.id OR a.candidate_email = u.email)
+                LEFT JOIN users u ON (CAST(a.candidate_id AS CHAR) = CAST(u.id AS CHAR) OR CAST(a.applicantId AS CHAR) = CAST(u.id AS CHAR) OR a.candidate_email = u.email)
                 WHERE ${conditions.join(' OR ')}
                 ORDER BY a.appliedAt DESC, a.id DESC
             `;
@@ -377,7 +377,7 @@ router.get('/job/:jobId', verifyToken, (req, res) => {
     const userId = String(req.user.id);
 
     // Check if employer owns the job or is admin
-    db.get('SELECT * FROM jobs WHERE (id = ? OR job_id = ?)', [jobId, jobId], (err, job) => {
+    db.get('SELECT * FROM jobs WHERE (CAST(id AS CHAR) = ? OR job_id = ?)', [String(jobId), String(jobId)], (err, job) => {
         if (err) return res.status(500).json({ message: 'Database error' });
         if (!job && req.user.role !== 'admin') {
             return res.status(404).json({ message: 'Job not found' });
@@ -393,12 +393,12 @@ router.get('/job/:jobId', verifyToken, (req, res) => {
                    COALESCE(c.resume_name, 'Resume.pdf') as real_resume_name
             FROM applications a
             LEFT JOIN candidates c ON (a.candidate_id = c.candidate_id OR a.applicantId = c.candidate_id OR a.candidate_email = c.email)
-            LEFT JOIN users u ON (a.candidate_id = u.id OR a.applicantId = u.id OR a.candidate_email = u.email)
-            WHERE a.jobId = ? OR a.jobId = ? OR CAST(a.jobId AS CHAR) = ?
+            LEFT JOIN users u ON (CAST(a.candidate_id AS CHAR) = CAST(u.id AS CHAR) OR CAST(a.applicantId AS CHAR) = CAST(u.id AS CHAR) OR a.candidate_email = u.email)
+            WHERE CAST(a.jobId AS CHAR) = ? OR a.jobId = ?
             ORDER BY a.appliedAt DESC, a.applied_date DESC
         `;
 
-        db.all(query, [jobId, String(jobId), String(jobId)], (err, rows) => {
+        db.all(query, [String(jobId), String(jobId)], (err, rows) => {
             if (err) {
                 console.error('Error fetching job applications:', err);
                 return res.status(500).json({ message: 'Error fetching applications' });
