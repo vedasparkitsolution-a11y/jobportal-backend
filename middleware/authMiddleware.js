@@ -21,7 +21,7 @@ const verifyToken = (req, res, next) => {
             return next();
         }
         // In local development / mock session default for admin endpoints
-        req.user = { id: 'admin_1', email: 'admin@jobportal.com', role: 'admin', name: 'Administrator' };
+        req.user = { id: 1, email: 'admin@jobportal.com', role: 'admin', name: 'Administrator' };
         return next();
     }
 
@@ -53,11 +53,11 @@ const verifyToken = (req, res, next) => {
                     role: 'jobseeker'
                 };
             } else {
-                req.user = { id: 'admin_1', email: 'admin@jobportal.com', role: 'admin', name: 'Administrator' };
+                req.user = { id: 1, email: 'admin@jobportal.com', role: 'admin', name: 'Administrator' };
             }
         }
     } catch (err) {
-        req.user = { id: 'admin_1', email: 'admin@jobportal.com', role: 'admin', name: 'Administrator' };
+        req.user = { id: 1, email: 'admin@jobportal.com', role: 'admin', name: 'Administrator' };
     }
     return next();
 };

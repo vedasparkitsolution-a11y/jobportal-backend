@@ -958,15 +958,27 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
     }
 
     try {
-        const userId = req.user.id;
-        const userEmail = req.user.email || '';
+        let rawUserId = req.user?.id;
+        let userId = parseInt(rawUserId, 10);
+        const userEmail = req.user?.email || '';
 
         // Query user and employer records to ensure complete company and contact metadata
         const userRecord = await new Promise(resolve => {
-            db.get('SELECT * FROM users WHERE id = ? OR email = ?', [userId, userEmail], (err, row) => resolve(row || null));
+            if (!isNaN(userId) && userId > 0) {
+                db.get('SELECT * FROM users WHERE id = ? OR (email = ? AND ? != \'\')', [userId, userEmail, userEmail], (err, row) => resolve(row || null));
+            } else if (userEmail) {
+                db.get('SELECT * FROM users WHERE email = ?', [userEmail], (err, row) => resolve(row || null));
+            } else {
+                db.get('SELECT * FROM users WHERE role = \'company\' OR role = \'admin\' LIMIT 1', [], (err, row) => resolve(row || null));
+            }
         });
+
+        if (isNaN(userId) || userId <= 0) {
+            userId = userRecord?.id ? Number(userRecord.id) : 1;
+        }
+
         const employerRecord = await new Promise(resolve => {
-            db.get('SELECT * FROM employers WHERE email = ? OR employer_id = ?', [userEmail, `emp_${userId}`], (err, row) => resolve(row || null));
+            db.get('SELECT * FROM employers WHERE email = ? OR employer_id = ? OR "userId" = ?', [userEmail, `emp_${userId}`, userId], (err, row) => resolve(row || null));
         });
 
         const userName = userRecord?.hrName || userRecord?.name || req.user.name || (userEmail ? userEmail.split('@')[0] : 'Employer');
@@ -1124,15 +1136,27 @@ router.post('/activate-instant', verifyToken, async (req, res) => {
     if (!planId) return res.status(400).json({ message: 'Plan ID is required for activation' });
 
     try {
-        const userId = req.user.id;
-        const userEmail = req.user.email || '';
+        let rawUserId = req.user?.id;
+        let userId = parseInt(rawUserId, 10);
+        const userEmail = req.user?.email || '';
 
         // Query user and employer records to ensure complete company and contact metadata
         const userRecord = await new Promise(resolve => {
-            db.get('SELECT * FROM users WHERE id = ? OR email = ?', [userId, userEmail], (err, row) => resolve(row || null));
+            if (!isNaN(userId) && userId > 0) {
+                db.get('SELECT * FROM users WHERE id = ? OR (email = ? AND ? != \'\')', [userId, userEmail, userEmail], (err, row) => resolve(row || null));
+            } else if (userEmail) {
+                db.get('SELECT * FROM users WHERE email = ?', [userEmail], (err, row) => resolve(row || null));
+            } else {
+                db.get('SELECT * FROM users WHERE role = \'company\' OR role = \'admin\' LIMIT 1', [], (err, row) => resolve(row || null));
+            }
         });
+
+        if (isNaN(userId) || userId <= 0) {
+            userId = userRecord?.id ? Number(userRecord.id) : 1;
+        }
+
         const employerRecord = await new Promise(resolve => {
-            db.get('SELECT * FROM employers WHERE email = ? OR employer_id = ?', [userEmail, `emp_${userId}`], (err, row) => resolve(row || null));
+            db.get('SELECT * FROM employers WHERE email = ? OR employer_id = ? OR "userId" = ?', [userEmail, `emp_${userId}`, userId], (err, row) => resolve(row || null));
         });
 
         const userName = userRecord?.hrName || userRecord?.name || req.user.name || (userEmail ? userEmail.split('@')[0] : 'Employer');
@@ -1192,8 +1216,8 @@ router.post('/activate-instant', verifyToken, async (req, res) => {
             // Supersede older active subscriptions for this employer/user
             db.run(
                 `UPDATE subscriptions SET status = 'superseded', updatedAt = CURRENT_TIMESTAMP 
-                 WHERE (userId = ? OR userEmail = ? OR companyId = ?) AND status = 'active'`,
-                [userId, userEmail, companyId]
+                 WHERE (userId = ? OR (userEmail = ? AND ? != '') OR (companyId = ? AND ? != '')) AND status = 'active'`,
+                [userId, userEmail, userEmail, companyId, companyId]
             );
 
             // Record employer subscription with all tracking fields initialized
