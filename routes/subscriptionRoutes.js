@@ -843,49 +843,55 @@ router.post('/create-order', verifyToken, async (req, res) => {
         let finalPrice = 0;
         let planName = '';
 
-        // Priority 1: Check unified plans table
-        const unifiedPlan = await new Promise((resolve) => {
-            db.get('SELECT * FROM plans WHERE id = ?', [planId], (err, row) => resolve(row));
-        });
-
-        if (unifiedPlan) {
-            planDetails = unifiedPlan;
-            planName = unifiedPlan.plan_name;
-            finalPrice = unifiedPlan.offer_price !== undefined && unifiedPlan.offer_price !== null ? unifiedPlan.offer_price : unifiedPlan.original_price;
-        }
-
-        if (!planDetails && targetRole === 'candidate') {
-            // Fetch from candidate_plans
+        // Check plan details by targetRole
+        if (targetRole === 'candidate') {
             const candidatePlan = await new Promise((resolve) => {
                 db.get('SELECT * FROM candidate_plans WHERE id = ?', [planId], (err, row) => resolve(row));
             });
 
             if (candidatePlan) {
                 planDetails = candidatePlan;
-                planName = candidatePlan.plan_name;
+                planName = candidatePlan.plan_name || candidatePlan.name;
                 finalPrice = candidatePlan.price;
-
-                if (offerId) {
-                    const offer = await new Promise((resolve) => {
-                        db.get('SELECT * FROM offers WHERE id = ?', [offerId], (err, row) => resolve(row));
-                    });
-                    if (offer && offer.offer_price !== undefined) {
-                        finalPrice = offer.offer_price;
-                        planDetails.appliedOffer = offer;
-                    }
+            } else {
+                const unifiedCand = await new Promise((resolve) => {
+                    db.get("SELECT * FROM plans WHERE id = ? AND (plan_type = 'candidate' OR target_role = 'candidate')", [planId], (err, row) => resolve(row));
+                });
+                if (unifiedCand) {
+                    planDetails = unifiedCand;
+                    planName = unifiedCand.plan_name;
+                    finalPrice = unifiedCand.offer_price !== undefined && unifiedCand.offer_price !== null ? unifiedCand.offer_price : unifiedCand.original_price;
                 }
             }
-        }
 
-        // If not found in candidate_plans or role is employer, check legacy subscription_plans
-        if (!planDetails) {
-            const subPlan = await new Promise((resolve) => {
-                db.get('SELECT * FROM subscription_plans WHERE id = ?', [planId], (err, row) => resolve(row));
+            if (offerId && planDetails) {
+                const offer = await new Promise((resolve) => {
+                    db.get('SELECT * FROM offers WHERE id = ?', [offerId], (err, row) => resolve(row));
+                });
+                if (offer && offer.offer_price !== undefined) {
+                    finalPrice = offer.offer_price;
+                    planDetails.appliedOffer = offer;
+                }
+            }
+        } else {
+            // Employer role: check unified plans or legacy subscription_plans
+            const unifiedPlan = await new Promise((resolve) => {
+                db.get("SELECT * FROM plans WHERE id = ? AND (plan_type = 'employer' OR plan_type = 'common' OR plan_type IS NULL OR plan_type = '')", [planId], (err, row) => resolve(row));
             });
-            if (subPlan) {
-                planDetails = subPlan;
-                planName = subPlan.name;
-                finalPrice = subPlan.price;
+
+            if (unifiedPlan) {
+                planDetails = unifiedPlan;
+                planName = unifiedPlan.plan_name;
+                finalPrice = unifiedPlan.offer_price !== undefined && unifiedPlan.offer_price !== null ? unifiedPlan.offer_price : unifiedPlan.original_price;
+            } else {
+                const subPlan = await new Promise((resolve) => {
+                    db.get('SELECT * FROM subscription_plans WHERE id = ?', [planId], (err, row) => resolve(row));
+                });
+                if (subPlan) {
+                    planDetails = subPlan;
+                    planName = subPlan.name;
+                    finalPrice = subPlan.price;
+                }
             }
         }
 
@@ -990,9 +996,55 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
         const userCompany = userRecord?.companyName || req.user.companyName || 'Company';
         const companyId = employerRecord?.company_id || userRecord?.company_id || `comp_${userId}`;
 
-        // Check unified plans table first
+        // If targetRole is candidate, prioritize candidate plans
+        if (targetRole === 'candidate') {
+            let candidatePlan = await new Promise((resolve) => {
+                db.get('SELECT * FROM candidate_plans WHERE id = ?', [planId], (err, row) => resolve(row));
+            });
+
+            if (!candidatePlan) {
+                candidatePlan = await new Promise((resolve) => {
+                    db.get("SELECT * FROM plans WHERE id = ? AND (plan_type = 'candidate' OR target_role = 'candidate')", [planId], (err, row) => resolve(row));
+                });
+            }
+
+            if (candidatePlan) {
+                const finalPrice = candidatePlan.offer_price !== undefined ? candidatePlan.offer_price : candidatePlan.price;
+                const days = candidatePlan.duration_days || 30;
+                const expiryDate = new Date();
+                expiryDate.setDate(expiryDate.getDate() + days);
+                const formattedExpiry = expiryDate.toISOString().slice(0, 19).replace('T', ' ');
+
+                db.run(
+                    `INSERT INTO payments (userId, planId, razorpayOrderId, razorpayPaymentId, amount, status) VALUES (?, ?, ?, ?, ?, 'success')`,
+                    [userId, planId, razorpay_order_id || 'order_mock', razorpay_payment_id || 'pay_mock', finalPrice]
+                );
+
+                db.run(
+                    `INSERT INTO candidate_subscriptions (
+                        candidate_id, candidate_email, candidate_name, plan_id, plan_name,
+                        amount_paid, application_limit, end_date, payment_status, status
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'active')`,
+                    [userId, userEmail, userName, candidatePlan.id, candidatePlan.plan_name || candidatePlan.name, finalPrice, candidatePlan.application_limit || candidatePlan.posting_limit || 20, formattedExpiry],
+                    function (err) {
+                        if (err) return res.status(500).json({ message: 'Error activating candidate subscription: ' + err.message });
+                        db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [userId]);
+                        return res.json({
+                            success: true,
+                            message: `Payment verified! Successfully activated ${candidatePlan.plan_name || candidatePlan.name}.`,
+                            expiryDate: formattedExpiry,
+                            planName: candidatePlan.plan_name || candidatePlan.name,
+                            application_limit: candidatePlan.application_limit || candidatePlan.posting_limit || 20
+                        });
+                    }
+                );
+                return;
+            }
+        }
+
+        // Check unified plans table for employer / common
         const unifiedPlan = await new Promise((resolve) => {
-            db.get('SELECT * FROM plans WHERE id = ?', [planId], (err, row) => resolve(row));
+            db.get("SELECT * FROM plans WHERE id = ? AND (plan_type = 'employer' OR plan_type = 'common' OR plan_type IS NULL OR plan_type = '')", [planId], (err, row) => resolve(row));
         });
 
         if (unifiedPlan) {
