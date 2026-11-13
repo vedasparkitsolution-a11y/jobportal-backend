@@ -591,7 +591,9 @@ router.put('/subscriptions/:id/status', verifyToken, verifyRole(['admin']), (req
 
 // 13. Employer Job Quota
 router.get('/employer-quota', verifyToken, (req, res) => {
-    const userId = req.user.id;
+    let rawUserId = req.user?.id;
+    let userId = parseInt(rawUserId, 10);
+    if (isNaN(userId) || userId <= 0) userId = 1;
     const userEmail = req.user.email || '';
     const userCompany = req.user.companyName || '';
 
@@ -1263,7 +1265,9 @@ router.post('/activate-instant', verifyToken, async (req, res) => {
 
 // 17. Current User Subscription Status
 router.get('/status', verifyToken, (req, res) => {
-    const userId = req.user.id;
+    let rawUserId = req.user?.id;
+    let userId = parseInt(rawUserId, 10);
+    if (isNaN(userId) || userId <= 0) userId = 1;
     const userEmail = req.user.email || '';
 
     const query = `
