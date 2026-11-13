@@ -5,9 +5,12 @@ const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
 const Razorpay = require('razorpay');
 const crypto = require('crypto');
 
+const RAZORPAY_KEY_ID = process.env.RAZORPAY_KEY_ID || 'rzp_test_TShLmUHYPSJNI0';
+const RAZORPAY_KEY_SECRET = process.env.RAZORPAY_KEY_SECRET || 'Oxd9z2sQvCPf8sJHCpiPC1S7';
+
 const razorpay = new Razorpay({
-    key_id: process.env.RAZORPAY_KEY_ID || 'mock_key_id',
-    key_secret: process.env.RAZORPAY_KEY_SECRET || 'mock_key_secret'
+    key_id: RAZORPAY_KEY_ID,
+    key_secret: RAZORPAY_KEY_SECRET
 });
 
 // Helper: Record Audit Log
@@ -825,8 +828,8 @@ router.get('/analytics', verifyToken, verifyRole(['admin']), (req, res) => {
 
 // 14.5 Razorpay Config Info
 router.get('/razorpay-config', (req, res) => {
-    const keyId = process.env.RAZORPAY_KEY_ID || 'mock_key_id';
-    const isMock = !process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID === 'mock_key_id';
+    const keyId = RAZORPAY_KEY_ID;
+    const isMock = !RAZORPAY_KEY_ID || RAZORPAY_KEY_ID === 'mock_key_id';
     res.json({ keyId, isMock });
 });
 
@@ -897,8 +900,8 @@ router.post('/create-order', verifyToken, async (req, res) => {
             receipt: `rcpt_${Date.now()}`
         };
 
-        const keyId = process.env.RAZORPAY_KEY_ID || 'mock_key_id';
-        const isLiveOrTestKey = process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_ID !== 'mock_key_id';
+        const keyId = RAZORPAY_KEY_ID;
+        const isLiveOrTestKey = keyId && keyId !== 'mock_key_id';
 
         if (isLiveOrTestKey && priceInPaise > 0) {
             try {
@@ -943,9 +946,9 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
         offerId = null 
     } = req.body || {};
 
-    const key_secret = process.env.RAZORPAY_KEY_SECRET || 'mock_key_secret';
+    const key_secret = RAZORPAY_KEY_SECRET;
     const isMock = razorpay_order_id && razorpay_order_id.startsWith('order_mock_');
-    const isMockEnv = !process.env.RAZORPAY_KEY_ID || process.env.RAZORPAY_KEY_ID === 'mock_key_id';
+    const isMockEnv = !RAZORPAY_KEY_ID || RAZORPAY_KEY_ID === 'mock_key_id';
     const isUpiOrSimulation = !razorpay_signature || razorpay_signature === 'mock_signature' || (razorpay_payment_id && razorpay_payment_id.startsWith('pay_upi_')) || isMock;
 
     let isAuthentic = isMock || isMockEnv || isUpiOrSimulation;
