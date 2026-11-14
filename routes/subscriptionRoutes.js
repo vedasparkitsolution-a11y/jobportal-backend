@@ -996,15 +996,18 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
         const userCompany = userRecord?.companyName || req.user.companyName || 'Company';
         const companyId = employerRecord?.company_id || userRecord?.company_id || `comp_${userId}`;
 
+        const cleanPlanId = parseInt(planId, 10) || 1;
+        const validUserId = Number(userId) || 1;
+
         // If targetRole is candidate, prioritize candidate plans
         if (targetRole === 'candidate') {
             let candidatePlan = await new Promise((resolve) => {
-                db.get('SELECT * FROM candidate_plans WHERE id = ?', [planId], (err, row) => resolve(row));
+                db.get('SELECT * FROM candidate_plans WHERE id = ?', [cleanPlanId], (err, row) => resolve(row));
             });
 
             if (!candidatePlan) {
                 candidatePlan = await new Promise((resolve) => {
-                    db.get("SELECT * FROM plans WHERE id = ? AND (plan_type = 'candidate' OR target_role = 'candidate')", [planId], (err, row) => resolve(row));
+                    db.get("SELECT * FROM plans WHERE id = ? AND (plan_type = 'candidate' OR target_role = 'candidate')", [cleanPlanId], (err, row) => resolve(row));
                 });
             }
 
@@ -1017,7 +1020,7 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
 
                 db.run(
                     `INSERT INTO payments (userId, planId, razorpayOrderId, razorpayPaymentId, amount, status) VALUES (?, ?, ?, ?, ?, 'success')`,
-                    [userId, planId, razorpay_order_id || 'order_mock', razorpay_payment_id || 'pay_mock', finalPrice]
+                    [validUserId, cleanPlanId, razorpay_order_id || 'order_mock', razorpay_payment_id || 'pay_mock', finalPrice]
                 );
 
                 db.run(
@@ -1025,10 +1028,10 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
                         candidate_id, candidate_email, candidate_name, plan_id, plan_name,
                         amount_paid, application_limit, end_date, payment_status, status
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'active')`,
-                    [userId, userEmail, userName, candidatePlan.id, candidatePlan.plan_name || candidatePlan.name, finalPrice, candidatePlan.application_limit || candidatePlan.posting_limit || 20, formattedExpiry],
+                    [validUserId, userEmail, userName, candidatePlan.id, candidatePlan.plan_name || candidatePlan.name, finalPrice, candidatePlan.application_limit || candidatePlan.posting_limit || 20, formattedExpiry],
                     function (err) {
                         if (err) return res.status(500).json({ message: 'Error activating candidate subscription: ' + err.message });
-                        db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [userId]);
+                        db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [validUserId]);
                         return res.json({
                             success: true,
                             message: `Payment verified! Successfully activated ${candidatePlan.plan_name || candidatePlan.name}.`,
@@ -1044,7 +1047,7 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
 
         // Check unified plans table for employer / common
         const unifiedPlan = await new Promise((resolve) => {
-            db.get("SELECT * FROM plans WHERE id = ? AND (plan_type = 'employer' OR plan_type = 'common' OR plan_type IS NULL OR plan_type = '')", [planId], (err, row) => resolve(row));
+            db.get("SELECT * FROM plans WHERE id = ? AND (plan_type = 'employer' OR plan_type = 'common' OR plan_type IS NULL OR plan_type = '')", [cleanPlanId], (err, row) => resolve(row));
         });
 
         if (unifiedPlan) {
@@ -1057,7 +1060,7 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
             // Record payment in payments table
             db.run(
                 `INSERT INTO payments (userId, planId, razorpayOrderId, razorpayPaymentId, amount, status) VALUES (?, ?, ?, ?, ?, 'success')`,
-                [userId, planId, razorpay_order_id || 'order_mock', razorpay_payment_id || 'pay_mock', finalPrice]
+                [validUserId, cleanPlanId, razorpay_order_id || 'order_mock', razorpay_payment_id || 'pay_mock', finalPrice]
             );
 
             if (unifiedPlan.plan_type === 'candidate') {
@@ -1067,10 +1070,10 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
                         candidate_id, candidate_email, candidate_name, plan_id, plan_name,
                         amount_paid, application_limit, end_date, payment_status, status
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'active')`,
-                    [userId, userEmail, userName, unifiedPlan.id, unifiedPlan.plan_name, finalPrice, unifiedPlan.posting_limit || 10, formattedExpiry],
+                    [validUserId, userEmail, userName, unifiedPlan.id, unifiedPlan.plan_name, finalPrice, unifiedPlan.posting_limit || 10, formattedExpiry],
                     function (err) {
                         if (err) return res.status(500).json({ message: 'Error activating candidate subscription: ' + err.message });
-                        db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [userId]);
+                        db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [validUserId]);
                         return res.json({
                             success: true,
                             message: `Payment verified! Successfully activated ${unifiedPlan.plan_name}.`,
@@ -1084,8 +1087,8 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
                 // Supersede older active subscriptions for this employer/user
                 db.run(
                     `UPDATE subscriptions SET status = 'superseded', updatedAt = CURRENT_TIMESTAMP 
-                     WHERE (userId = ? OR userEmail = ? OR companyId = ?) AND status = 'active'`,
-                    [userId, userEmail, companyId]
+                     WHERE (userId = ? OR (userEmail = ? AND ? != '') OR (companyId = ? AND ? != '')) AND status = 'active'`,
+                    [validUserId, userEmail, userEmail, String(companyId || ''), String(companyId || '')]
                 );
 
                 // Record employer subscription with all tracking fields initialized
@@ -1094,13 +1097,13 @@ router.post('/verify-payment', verifyToken, async (req, res) => {
                         userId, companyId, companyName, employerName, userEmail, planId, target_role, plan_type, amount,
                         payment_status, status, startDate, expiryDate, jobsUsed, contactsViewed, resumeDownloads
                     ) VALUES (?, ?, ?, ?, ?, ?, 'employer', 'common', ?, 'paid', 'active', CURRENT_TIMESTAMP, ?, 0, 0, 0)`,
-                    [userId, companyId, userCompany, userName, userEmail, planId, finalPrice, formattedExpiry],
+                    [validUserId, String(companyId || `comp_${validUserId}`), userCompany, userName, userEmail, cleanPlanId, finalPrice, formattedExpiry],
                     function (err) {
                         if (err) {
                             console.error('Error activating employer subscription:', err);
                             return res.status(500).json({ message: 'Error activating employer subscription: ' + err.message });
                         }
-                        db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [userId]);
+                        db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [validUserId]);
                         return res.json({
                             success: true,
                             message: `Payment verified and ${unifiedPlan.plan_name} activated successfully!`,
@@ -1243,10 +1246,13 @@ router.post('/activate-instant', verifyToken, async (req, res) => {
         expiryDate.setDate(expiryDate.getDate() + Number(days));
         const formattedExpiry = expiryDate.toISOString().slice(0, 19).replace('T', ' ');
 
+        const cleanPlanId = parseInt(plan.id, 10) || 1;
+        const validUserId = Number(userId) || 1;
+
         // Record payment in payments table
         db.run(
             `INSERT INTO payments (userId, planId, razorpayOrderId, razorpayPaymentId, amount, status) VALUES (?, ?, ?, ?, ?, 'success')`,
-            [userId, plan.id, 'instant_order_' + Date.now(), 'pay_instant_' + Date.now(), finalPrice],
+            [validUserId, cleanPlanId, 'instant_order_' + Date.now(), 'pay_instant_' + Date.now(), finalPrice],
             () => {}
         );
 
@@ -1256,10 +1262,10 @@ router.post('/activate-instant', verifyToken, async (req, res) => {
                     candidate_id, candidate_email, candidate_name, plan_id, plan_name,
                     amount_paid, application_limit, end_date, payment_status, status
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', 'active')`,
-                [userId, userEmail, userName, plan.id, planName, finalPrice, plan.posting_limit || 10, formattedExpiry],
+                [validUserId, userEmail, userName, cleanPlanId, planName, finalPrice, plan.posting_limit || 10, formattedExpiry],
                 function (err) {
                     if (err) return res.status(500).json({ message: 'Error activating candidate subscription: ' + err.message });
-                    db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [userId]);
+                    db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [validUserId]);
                     return res.json({
                         success: true,
                         message: `🎉 Plan "${planName}" activated successfully!`,
@@ -1274,7 +1280,7 @@ router.post('/activate-instant', verifyToken, async (req, res) => {
             db.run(
                 `UPDATE subscriptions SET status = 'superseded', updatedAt = CURRENT_TIMESTAMP 
                  WHERE (userId = ? OR (userEmail = ? AND ? != '') OR (companyId = ? AND ? != '')) AND status = 'active'`,
-                [userId, userEmail, userEmail, companyId, companyId]
+                [validUserId, userEmail, userEmail, String(companyId || ''), String(companyId || '')]
             );
 
             // Record employer subscription with all tracking fields initialized
@@ -1283,22 +1289,22 @@ router.post('/activate-instant', verifyToken, async (req, res) => {
                     userId, companyId, companyName, employerName, userEmail, planId, target_role, plan_type, amount,
                     payment_status, status, startDate, expiryDate, jobsUsed, contactsViewed, resumeDownloads
                 ) VALUES (?, ?, ?, ?, ?, ?, 'employer', 'common', ?, 'paid', 'active', CURRENT_TIMESTAMP, ?, 0, 0, 0)`,
-                [userId, companyId, userCompany, userName, userEmail, plan.id, finalPrice, formattedExpiry],
+                [validUserId, String(companyId || `comp_${validUserId}`), userCompany, userName, userEmail, cleanPlanId, finalPrice, formattedExpiry],
                 function (err) {
                     if (err) {
                         console.error('Error activating employer subscription:', err);
                         return res.status(500).json({ message: 'Error activating employer subscription: ' + err.message });
                     }
-                    db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [userId]);
+                    db.run('UPDATE users SET isPremium = 1 WHERE id = ?', [validUserId]);
 
                     recordAuditLog(
                         req.user,
                         'ACTIVATE_PLAN_INSTANT',
                         'subscriptions',
-                        plan.id,
+                        cleanPlanId,
                         planName,
                         `Instantly activated "${planName}" for ${userCompany} (${userEmail})`,
-                        { planId: plan.id, planName, userId, companyId, formattedExpiry }
+                        { planId: cleanPlanId, planName, userId: validUserId, companyId, formattedExpiry }
                     );
 
                     return res.json({

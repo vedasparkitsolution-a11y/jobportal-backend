@@ -5,7 +5,7 @@ const { verifyToken, verifyRole } = require('../middleware/authMiddleware');
 
 // Helper: Record Admin Audit Log
 const recordAuditLog = (user, action, targetType, targetId, targetName, description, details = {}) => {
-    const adminId = user?.id || 'admin_1';
+    const adminId = user?.id || 1;
     const adminName = user?.name || 'Administrator';
     const adminEmail = user?.email || 'admin@jobportal.com';
     const detailsJson = typeof details === 'string' ? details : JSON.stringify(details, null, 2);
@@ -149,11 +149,8 @@ router.post('/', verifyToken, verifyRole(['admin']), (req, res) => {
         return res.status(400).json({ message: 'Plan name is required.' });
     }
 
-    let origPrice = Math.max(0, Number(original_price) || 0);
-    let offPrice = Math.max(0, Number(offer_price !== undefined && offer_price !== '' ? offer_price : origPrice));
-    if (origPrice === 0 && offPrice > 0) {
-        origPrice = offPrice;
-    }
+    const origPrice = Math.max(0, Number(original_price) || 0);
+    const offPrice = Math.max(0, Number(offer_price !== undefined ? offer_price : origPrice));
 
     if (offPrice > origPrice && origPrice > 0) {
         return res.status(400).json({ message: 'Offer price cannot be greater than original price.' });
@@ -247,11 +244,8 @@ router.put('/:id', verifyToken, verifyRole(['admin']), (req, res) => {
         return res.status(400).json({ message: 'Plan name is required.' });
     }
 
-    let origPrice = Math.max(0, Number(original_price) || 0);
-    let offPrice = Math.max(0, Number(offer_price !== undefined && offer_price !== '' ? offer_price : origPrice));
-    if (origPrice === 0 && offPrice > 0) {
-        origPrice = offPrice;
-    }
+    const origPrice = Math.max(0, Number(original_price) || 0);
+    const offPrice = Math.max(0, Number(offer_price !== undefined ? offer_price : origPrice));
 
     let discountPercentage = 0;
     if (origPrice > 0 && offPrice < origPrice) {
