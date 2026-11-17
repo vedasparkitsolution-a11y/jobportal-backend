@@ -615,12 +615,19 @@ router.get('/employer-quota', verifyToken, (req, res) => {
             FROM subscriptions s
             LEFT JOIN plans p1 ON s.planId = p1.id
             LEFT JOIN subscription_plans p2 ON s.planId = p2.id
-            WHERE (s.userId = ? OR s.companyId = ? OR s.userEmail = ? OR s.companyId = (SELECT company_id FROM employers WHERE employer_id = ? OR email = ?))
-              AND s.status = 'active' AND s.expiryDate > datetime('now')
+            WHERE (
+                s.userId = ? 
+                OR s.companyId = ? 
+                OR s.userEmail = ? 
+                OR (s.companyName IS NOT NULL AND LOWER(TRIM(s.companyName)) = LOWER(TRIM(?)))
+                OR (s.employerName IS NOT NULL AND LOWER(TRIM(s.employerName)) = LOWER(TRIM(?)))
+                OR s.companyId = (SELECT company_id FROM employers WHERE employer_id = ? OR email = ?)
+            )
+              AND s.status = 'active' AND (s.expiryDate > CURRENT_TIMESTAMP OR s.expiryDate IS NULL)
             ORDER BY s.id DESC LIMIT 1
         `;
 
-        db.get(subQuery, [userId, String(userId), userEmail, String(userId), userEmail], (subErr, sub) => {
+        db.get(subQuery, [userId, String(userId), userEmail, userCompany, userCompany, String(userId), userEmail], (subErr, sub) => {
             const targetIds = [String(userId), `comp_${userId}`, `emp_${userId}`];
             if (sub && sub.companyId) targetIds.push(String(sub.companyId));
             const idPlaceholders = targetIds.map(() => '?').join(',');
@@ -1329,7 +1336,8 @@ router.get('/status', verifyToken, (req, res) => {
     let rawUserId = req.user?.id;
     let userId = parseInt(rawUserId, 10);
     if (isNaN(userId) || userId <= 0) userId = 1;
-    const userEmail = req.user.email || '';
+    const userEmail = req.user?.email || '';
+    const userCompany = req.user?.companyName || req.user?.company_name || req.user?.name || '';
 
     const query = `
         SELECT s.*, 
@@ -1343,12 +1351,19 @@ router.get('/status', verifyToken, (req, res) => {
         FROM subscriptions s
         LEFT JOIN plans p1 ON s.planId = p1.id
         LEFT JOIN subscription_plans p2 ON s.planId = p2.id
-        WHERE (s.userId = ? OR s.userEmail = ? OR s.companyId = ? OR s.companyId = (SELECT company_id FROM employers WHERE employer_id = ? OR email = ?))
-          AND s.status = 'active' AND s.expiryDate > datetime('now')
+        WHERE (
+            s.userId = ? 
+            OR s.companyId = ? 
+            OR s.userEmail = ? 
+            OR (s.companyName IS NOT NULL AND LOWER(TRIM(s.companyName)) = LOWER(TRIM(?)))
+            OR (s.employerName IS NOT NULL AND LOWER(TRIM(s.employerName)) = LOWER(TRIM(?)))
+            OR s.companyId = (SELECT company_id FROM employers WHERE employer_id = ? OR email = ?)
+        )
+          AND s.status = 'active' AND (s.expiryDate > CURRENT_TIMESTAMP OR s.expiryDate IS NULL)
         ORDER BY s.id DESC LIMIT 1
     `;
 
-    db.get(query, [userId, userEmail, String(userId), String(userId), userEmail], (err, subscription) => {
+    db.get(query, [userId, String(userId), userEmail, userCompany, userCompany, String(userId), userEmail], (err, subscription) => {
         if (err) return res.status(500).json({ message: 'Error fetching subscription: ' + err.message });
 
         if (!subscription) {
@@ -1713,7 +1728,7 @@ router.get('/candidate-perks', verifyToken, (req, res) => {
                 LEFT JOIN offers o ON cs.offer_id = o.id
                 WHERE (cs.candidate_id = ? OR cs.candidate_email = ?) 
                   AND cs.status = 'active' 
-                  AND cs.end_date > datetime('now')
+                  AND (cs.end_date > CURRENT_TIMESTAMP OR cs.end_date IS NULL)
                 ORDER BY cs.id DESC LIMIT 1
             `;
 
